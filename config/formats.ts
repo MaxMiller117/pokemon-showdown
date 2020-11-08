@@ -21,7 +21,25 @@ export const Formats: FormatList = [
 
 	// Sw/Sh Singles
 	///////////////////////////////////////////////////////////////////
+	{
+		section: "RD2L Pokemon Specials",
+	},
+	{
+	name: "[Gen 8] WeeGC 2021",
+	threads: [
+		`&bullet; vgc but small`,
+	],
 
+	mod: 'gen8',
+	gameType: 'doubles',
+	teamLength: {
+		validate: [4, 6],
+		battle: 4,
+	},
+	ruleset: ['Standard GBU', 'VGC Timer', 'Sleep Clause Mod', 'Little Cup', 'OHKO Clause', 'Evasion Moves Clause'],
+	banlist: ['Moody', 'Sonic Boom', 'Dragon Rage', 'Berry Juice'],
+	minSourceGen: 8,
+	},
 	{
 		section: "Sw/Sh Singles",
 	},
