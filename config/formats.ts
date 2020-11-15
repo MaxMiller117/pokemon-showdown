@@ -32,11 +32,12 @@ export const Formats: FormatList = [
 
 	mod: 'gen8',
 	gameType: 'doubles',
+	forcedLevel: 5,
 	teamLength: {
 		validate: [4, 6],
 		battle: 4,
 	},
-	ruleset: ['Standard GBU', 'VGC Timer', 'Sleep Clause Mod', 'Little Cup', 'OHKO Clause', 'Evasion Moves Clause'],
+	ruleset: ['Standard GBU', 'VGC Timer', 'Sleep Clause Mod', 'OHKO Clause', 'Evasion Moves Clause'],
 	banlist: ['Moody', 'Sonic Boom', 'Dragon Rage', 'Berry Juice'],
 	minSourceGen: 8,
 	},
