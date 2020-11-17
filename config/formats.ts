@@ -50,6 +50,9 @@ export const Formats: FormatList = [
 		],
 		mod: 'gen8',
 		team: 'random',
+		teamLength: {
+			battle: 4,
+		},
 		ruleset: ['Team Preview', 'PotD', 'HP Percentage Mod', 'Cancel Mod', 'Sleep Clause Mod'],
 	},
 	
