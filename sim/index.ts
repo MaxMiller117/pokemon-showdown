@@ -25,6 +25,9 @@ export { Dex, toID } from './dex';
 export { Teams } from './teams';
 export { TeamValidator } from './team-validator';
 export {
+	buildTeamFromList, TeamFromListError,
+} from './team-from-list';
+export {
 	assertAllowedBattleHost,
 	chooseFromRequest,
 	DEFAULT_BOT_NAME,
