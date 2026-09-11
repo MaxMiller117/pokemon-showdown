@@ -32,8 +32,10 @@ export {
 	chooseFromRequest,
 	DEFAULT_BOT_NAME,
 	DEFAULT_FORMAT,
+	parsePracticeTarget,
+	parseSpeciesList,
 	runLocalGame,
-	stubTeam,
+	teamFromSpeciesList,
 } from './practice-player';
 
 // misc libraries

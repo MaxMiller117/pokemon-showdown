@@ -2,8 +2,14 @@
  * In-process practice player that accepts challenges on this side server.
  *
  * Spawned as a connected User (RD2LPractice by default). Humans challenge it
- * on play.rd2lpl.com; it auto-accepts, brings a stub random/legal team, and
- * chooses via stock RandomPlayerAI. No outbound connection to smogon main.
+ * on play.rd2lpl.com with a species list (this week's draft pool); it
+ * auto-accepts, brings a legal team drawn only from that pool, and chooses
+ * via stock RandomPlayerAI. No outbound connection to smogon main. No Discord.
+ *
+ * Species list hook (smallest fork-native):
+ *   /practiceplayer pool Garchomp, Heatran, ...
+ *   /practice gen9natdexdraft, Garchomp, Heatran, ...
+ *   Config.practiceplayer.species = ['Garchomp', ...]
  *
  * Enable with Config.practiceplayer.enabled = true.
  */
@@ -18,7 +24,11 @@ import {
 	GENERATOR_NAME,
 	isAllowedBattleHost,
 	isSmogonMainHost,
-	stubTeam,
+	parsePracticeTarget,
+	parseSpeciesList,
+	PracticePlayerError,
+	resolveChallengeFormat,
+	teamFromSpeciesList,
 } from '../../sim/practice-player';
 import { ObjectReadWriteStream } from '../../lib/streams';
 
@@ -26,6 +36,8 @@ interface PracticePlayerConfig {
 	enabled?: boolean;
 	name?: string;
 	format?: string;
+	species?: string[] | string;
+	mode?: 'pick' | 'fixed';
 }
 
 function pluginConfig(): PracticePlayerConfig {
@@ -46,6 +58,62 @@ export function defaultFormat(): string {
 
 export function isPracticeBotUser(user: User | null | undefined): boolean {
 	return !!user && user.id === botId();
+}
+
+function configSpecies(): string[] {
+	return parseSpeciesList(pluginConfig().species);
+}
+
+function configMode(): 'pick' | 'fixed' {
+	return pluginConfig().mode === 'fixed' ? 'fixed' : 'pick';
+}
+
+/** Per-challenger pool from `/practiceplayer pool` / `/practice`. */
+const userPools = new Map<ID, string[]>();
+/** Room-wide override (last `/practiceplayer pool` with no user scope needed). */
+let globalPool: string[] | null = null;
+
+export function setUserPool(userid: string, species: readonly string[]) {
+	const list = parseSpeciesList(species as string[]);
+	if (!list.length) {
+		userPools.delete(toID(userid));
+		return;
+	}
+	userPools.set(toID(userid), list);
+}
+
+export function getUserPool(userid: string): string[] | null {
+	return userPools.get(toID(userid)) || null;
+}
+
+export function setGlobalPool(species: readonly string[] | null) {
+	if (species == null) {
+		globalPool = null;
+		return;
+	}
+	const list = parseSpeciesList(species as string[]);
+	globalPool = list.length ? list : null;
+}
+
+export function getGlobalPool(): string[] | null {
+	return globalPool;
+}
+
+export function resetPools() {
+	userPools.clear();
+	globalPool = null;
+}
+
+/**
+ * Challenger pool, then global `/practiceplayer pool`, then config species.
+ */
+export function resolveSpeciesList(challengerId?: string | null): string[] {
+	if (challengerId) {
+		const mine = getUserPool(challengerId);
+		if (mine?.length) return mine;
+	}
+	if (globalPool?.length) return globalPool;
+	return configSpecies();
 }
 
 let botUser: User | null = null;
@@ -81,8 +149,7 @@ export function getPracticeBot(): User | null {
 export function spawnPracticeBot(name = botName()): User {
 	const existing = getPracticeBot();
 	if (existing) {
-		const stub = stubTeam(defaultFormat());
-		existing.battleSettings.team = stub.bringTeam ? stub.packed : '';
+		existing.battleSettings.team = '';
 		return existing;
 	}
 
@@ -99,8 +166,7 @@ export function spawnPracticeBot(name = botName()): User {
 	user.forceRename(name, true);
 	user.settings.blockChallenges = false;
 	user.isPublicBot = true;
-	const stub = stubTeam(defaultFormat());
-	user.battleSettings.team = stub.bringTeam ? stub.packed : '';
+	user.battleSettings.team = '';
 	botUser = user;
 	return user;
 }
@@ -130,29 +196,45 @@ async function acceptIncomingChallenge(challenger: User, bot: User, format: stri
 			return;
 		}
 
-		let stub;
+		let resolvedFormat: string;
 		try {
-			stub = stubTeam(String(format) || defaultFormat());
+			resolvedFormat = resolveChallengeFormat(String(format) || defaultFormat());
 		} catch (err: any) {
 			Ladders.challenges.remove(chall, false);
-			lastAcceptError = err?.message || 'stub team failed';
+			lastAcceptError = err?.message || 'format not supported';
 			challenger.popup(
-				`Practice bot v1 could not build a legal team for ${format}. ` +
-				`Challenge ${bot.name} in a random-team format such as ${DEFAULT_FORMAT}.`
-			);
-			return;
-		}
-		if (toID(stub.format) !== toID(String(format))) {
-			Ladders.challenges.remove(chall, false);
-			lastAcceptError = `format mismatch stub=${stub.format} challenged=${format}`;
-			challenger.popup(
-				`Practice bot v1 only auto-plays formats with a random team generator ` +
-				`(e.g. ${DEFAULT_FORMAT}). You challenged ${format}.`
+				`Practice bot could not accept ${format}. ` +
+				(err?.message || `Default format is ${DEFAULT_FORMAT}.`)
 			);
 			return;
 		}
 
-		bot.battleSettings.team = stub.bringTeam ? stub.packed : '';
+		const species = resolveSpeciesList(challenger.id);
+		if (!species.length) {
+			Ladders.challenges.remove(chall, false);
+			lastAcceptError = 'no species list';
+			challenger.popup(
+				`Practice bot needs a species list (this week's draft pool). ` +
+				`Use /practiceplayer pool Species1, Species2, ... then challenge, ` +
+				`or /practice ${DEFAULT_FORMAT}, Species1, Species2, ...`
+			);
+			return;
+		}
+
+		let built;
+		try {
+			built = teamFromSpeciesList(species, resolvedFormat, { mode: configMode() });
+		} catch (err: any) {
+			Ladders.challenges.remove(chall, false);
+			lastAcceptError = err?.message || 'list team failed';
+			challenger.popup(
+				`Practice bot could not build a legal team from the pool for ${resolvedFormat}. ` +
+				`${err?.message || ''}`
+			);
+			return;
+		}
+
+		bot.battleSettings.team = built.bringTeam ? built.packed : '';
 		const gameRoom = await Ladders.acceptChallenge(conn, chall as Ladders.BattleChallenge);
 		if (gameRoom?.battle) {
 			void playBattle(gameRoom.battle, bot);
@@ -197,6 +279,7 @@ export function start() {
 
 export function destroy() {
 	destroyPracticeBot();
+	resetPools();
 }
 
 export const handlers: Chat.HandlerTable = {
@@ -218,11 +301,18 @@ export const commands: Chat.ChatCommands = {
 			throw new Chat.ErrorMessage(`Practice bot is disabled. Set Config.practiceplayer.enabled = true and restart, or use /practiceplayer start.`);
 		}
 		if (!getPracticeBot()) spawnPracticeBot();
-		const format = Dex.toID(target) || defaultFormat();
-		return this.parse(`/challenge ${botName()}, ${format}`);
+		const parsed = parsePracticeTarget(target, defaultFormat());
+		if (parsed.species?.length) setUserPool(user.id, parsed.species);
+		if (!resolveSpeciesList(user.id).length) {
+			throw new Chat.ErrorMessage(
+				`Set a species list first: /practiceplayer pool Species1, Species2, ... ` +
+				`or /practice ${defaultFormat()}, Species1, Species2, ...`
+			);
+		}
+		return this.parse(`/challenge ${botName()}, ${parsed.format}`);
 	},
 	practicehelp: [
-		`/practice [format] - Challenge the in-process practice bot (stock RandomPlayerAI). Default format: ${DEFAULT_FORMAT}.`,
+		`/practice [format], [species, ...] - Challenge the practice bot with a species list. Default format: ${DEFAULT_FORMAT}.`,
 	],
 
 	practiceplayer: {
@@ -232,9 +322,50 @@ export const commands: Chat.ChatCommands = {
 		help() {
 			this.sendReplyBox(
 				`<strong>Practice player</strong> (${AI_NAME}, ${GENERATOR_NAME})<br />` +
-				`Challenge <code>${Chat.escapeHTML(botName())}</code> on this server, or <code>/practice [format]</code>.<br />` +
-				`v1 team: random/legal stub via <code>Teams.generate</code> (default <code>${DEFAULT_FORMAT}</code>).<br />` +
-				`Does not connect to the smogon main ladder. Public replays stay censored.`
+				`Challenge <code>${Chat.escapeHTML(botName())}</code> on this server with a species list ` +
+				`(this week's draft pool).<br />` +
+				`<code>/practiceplayer pool Species1, Species2, ...</code> then challenge, or ` +
+				`<code>/practice ${DEFAULT_FORMAT}, Species1, Species2, ...</code>.<br />` +
+				`Default format: <code>${DEFAULT_FORMAT}</code> (RD2L NatDex Draft). ` +
+				`Challenge format is honored when PS already supports it.<br />` +
+				`Team: 6-from-N (<code>pick</code>) or <code>fixed</code> via Config.practiceplayer.mode. ` +
+				`Generator: <code>${GENERATOR_NAME}</code>.<br />` +
+				`Does not connect to the smogon main ladder. No Discord spawn. Public replays stay censored.`
+			);
+		},
+		pool(target, room, user) {
+			const trimmed = target.trim();
+			if (!trimmed || trimmed === 'show') {
+				const mine = getUserPool(user.id);
+				const resolved = resolveSpeciesList(user.id);
+				this.sendReply(
+					`Your pool: ${mine?.join(', ') || '(none)'} | ` +
+					`global: ${globalPool?.join(', ') || '(none)'} | ` +
+					`config: ${configSpecies().join(', ') || '(none)'} | ` +
+					`resolved: ${resolved.join(', ') || '(empty)'}`
+				);
+				return;
+			}
+			if (toID(trimmed) === 'clear') {
+				setUserPool(user.id, []);
+				this.sendReply(`Cleared your practice species pool.`);
+				return;
+			}
+			if (toID(trimmed) === 'clearglobal') {
+				this.checkCan('lockdown');
+				setGlobalPool(null);
+				this.sendReply(`Cleared the global practice species pool.`);
+				return;
+			}
+			const species = parseSpeciesList(trimmed);
+			if (!species.length) {
+				throw new Chat.ErrorMessage(`Usage: /practiceplayer pool Species1, Species2, ...`);
+			}
+			setUserPool(user.id, species);
+			setGlobalPool(species);
+			this.sendReply(
+				`Practice pool set (${species.length}): ${species.join(', ')}. ` +
+				`Challenge ${botName()} in ${defaultFormat()} (or another PS format).`
 			);
 		},
 		start() {
@@ -249,15 +380,18 @@ export const commands: Chat.ChatCommands = {
 		},
 		status() {
 			const bot = getPracticeBot();
+			const resolved = resolveSpeciesList();
 			this.sendReply(
 				`practiceplayer: ${bot ? `online as ${bot.name}` : 'offline'} | ` +
 				`enabled=${!!pluginConfig().enabled} | format=${defaultFormat()} | ` +
+				`mode=${configMode()} | pool=${resolved.length} | ` +
 				`ai=${AI_NAME} | generator=${GENERATOR_NAME}`
 			);
 		},
 	},
 	practiceplayerhelp: [
 		`/practiceplayer help - How to challenge the practice bot.`,
+		`/practiceplayer pool [species, ...] - Set this week's draft pool (fork-native hook).`,
 		`/practiceplayer start - Admin: spawn the in-process bot user.`,
 		`/practiceplayer stop - Admin: destroy the bot user.`,
 	],
@@ -269,4 +403,6 @@ export const practicePlayerInternals = {
 	isSmogonMainHost,
 	AI_NAME,
 	GENERATOR_NAME,
+	DEFAULT_FORMAT,
+	PracticePlayerError,
 };
