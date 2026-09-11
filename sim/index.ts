@@ -24,6 +24,19 @@ export { Dex, toID } from './dex';
 
 export { Teams } from './teams';
 export { TeamValidator } from './team-validator';
+export {
+	buildTeamFromList, TeamFromListError,
+} from './team-from-list';
+export {
+	assertAllowedBattleHost,
+	chooseFromRequest,
+	DEFAULT_BOT_NAME,
+	DEFAULT_FORMAT,
+	parsePracticeTarget,
+	parseSpeciesList,
+	runLocalGame,
+	teamFromSpeciesList,
+} from './practice-player';
 
 // misc libraries
 
