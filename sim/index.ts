@@ -24,6 +24,9 @@ export { Dex, toID } from './dex';
 
 export { Teams } from './teams';
 export { TeamValidator } from './team-validator';
+export {
+	buildTeamFromList, TeamFromListError, DEFAULT_FORMAT, GENERATOR_NAME,
+} from './team-from-list';
 
 // misc libraries
 
