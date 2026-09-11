@@ -432,6 +432,20 @@ exports.logchat = false;
 exports.logchallenges = false;
 
 /**
+ * practiceplayer - in-process practice opponent (stock RandomPlayerAI).
+ * When enabled, a connected user (default RD2LPractice) auto-accepts
+ * challenges on THIS server only. Never connects to smogon main.
+ * Leave disabled until you want the nick in the userlist.
+ *
+ * @type {{enabled?: boolean, name?: string, format?: string}}
+ */
+exports.practiceplayer = {
+	enabled: false,
+	name: 'RD2LPractice',
+	format: 'gen9randombattle',
+};
+
+/**
  * loguserstats - how often (in milliseconds) to write user stats to the
  * lobby log. This has no effect if `logchat` is disabled.
  */
